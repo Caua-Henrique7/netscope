@@ -51,6 +51,10 @@ def render_scan(scan: dict, color: bool = True) -> str:
         for column, service in rows:
             lines.append(f"  {column:<{width}}  {service}")
 
+        key = host.get("asset_key")
+        if key:
+            lines.append(style(f"  id: {key}", "dim"))
+
     stats = scan["stats"]
     lines.append("")
     lines.append(style(
@@ -83,6 +87,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         ips, ports,
         timeout=args.timeout, concurrency=args.concurrency, rate=args.rate,
         skip_discovery=args.skip_discovery, resolve_dns=not args.no_dns,
+        identity=not args.no_identity,
         randomize=not args.no_randomize, show_progress=not quiet, log=log,
         meta={"name": args.name, "targets_input": tokens, "ports_spec": args.ports},
     ))
@@ -117,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="máximo de tentativas de conexão por segundo")
     scan.add_argument("-n", "--no-dns", action="store_true",
                       help="não faz busca reversa de DNS")
+    scan.add_argument("--no-identity", action="store_true",
+                      help="não coleta identidade (TLS, SSH, MAC)")
     scan.add_argument("--no-randomize", action="store_true",
                       help="escaneia as portas em ordem, sem embaralhar")
     scan.add_argument("--allow-public", action="store_true",

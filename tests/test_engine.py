@@ -75,3 +75,53 @@ def test_meta_passthrough():
     assert scan["name"] == "teste"
     assert scan["targets_input"] == ["127.0.0.1"]
     assert scan["tool"] == "netscope"
+
+
+def test_identity_collected_for_tls(monkeypatch):
+    import ssl
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from netscope import identity as idmod
+
+    tmp = tempfile.TemporaryDirectory()
+    cert = Path(tmp.name) / "c.pem"
+    key = Path(tmp.name) / "k.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=lab"],
+        check=True, capture_output=True, 
+    )
+    port = _free_port()
+    monkeypatch.setattr(idmod, "TLS_HINT_PORTS", (port,))
+
+    async def run():
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(cert), str(key))
+        server = await asyncio.start_server(
+            lambda r, w: w.close(), "127.0.0.1", port, ssl=context
+        )
+        try:
+            return await run_scan(
+                ["127.0.0.1"], [port], timeout=2.0, resolve_dns=False, show_progress=False,
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    scan = asyncio.run(run())
+    host = scan["hosts"][0]
+    assert host["identity"]["tls"] and host["identity"]["tls"].startswith("SHA256:")
+    assert host["asset_key"].startswith("tls:")
+
+
+def test_identity_disabled_leaves_none():
+    closed_port = _free_port()
+    scan = asyncio.run(run_scan(
+        ["127.0.0.1"], [closed_port], timeout=1.0, resolve_dns=False,
+        show_progress=False, identity=False,
+    ))
+    host = scan["hosts"][0]
+    assert host["identity"] is None
+    assert host["asset_key"] is None

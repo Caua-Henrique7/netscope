@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from . import __version__
+from .identity import asset_key, collect_identity
 from .ports import SERVICE_NAMES
 from .utils import Progress, RateLimiter, safe_concurrency
 
@@ -132,6 +133,7 @@ async def run_scan(
     rate: float | None = None,
     skip_discovery: bool = False,
     resolve_dns: bool = True,
+    identity: bool = True,
     randomize: bool = True,
     show_progress: bool = True,
     log: Callable[[str], None] | None = None,
@@ -187,6 +189,8 @@ async def run_scan(
             ],
             "closed": entry["closed"],
             "filtered": entry["filtered"],
+            "identity": None,
+            "asset_key": None,
         }
 
     if resolve_dns and hosts:
@@ -194,6 +198,18 @@ async def run_scan(
         names = await asyncio.gather(*(_reverse_dns(ip, sem) for ip in hosts))
         for ip, name in zip(hosts, names):
             hosts[ip]["hostname"] = name
+
+    if identity and hosts:
+        log(f"[*] Coletando identidade de {len(hosts)} host(s)...")
+        slots = asyncio.Semaphore(min(32, concurrency))
+
+        async def gather_identity(host: dict) -> None:
+            async with slots:
+                open_ports = [record["port"] for record in host["ports"]]
+                host["identity"] = await collect_identity(host["ip"], open_ports, timeout)
+                host["asset_key"] = asset_key(host["identity"])
+
+        await asyncio.gather(*(gather_identity(host) for host in hosts.values()))
 
     def ip_key(host: dict) -> tuple[int, int]:
         address = ipaddress.ip_address(host["ip"])
